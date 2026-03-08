@@ -1,26 +1,177 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f2ede3;
+  --foreground: #17222f;
+  --panel: rgba(255, 248, 239, 0.86);
+  --panel-strong: rgba(255, 252, 247, 0.94);
+  --muted: #6e716f;
+  --accent: #c2642d;
+  --accent-strong: #0f5b66;
+  --line: rgba(30, 37, 44, 0.12);
+  --shadow: 0 18px 50px rgba(23, 34, 47, 0.08);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-noto-sans-kr);
+  --font-mono: var(--font-ibm-plex-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background:
+    radial-gradient(circle at top left, rgba(194, 100, 45, 0.15), transparent 35%),
+    radial-gradient(circle at top right, rgba(15, 91, 102, 0.16), transparent 32%),
+    linear-gradient(180deg, #efe8dc 0%, #f4efe7 100%);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-noto-sans-kr), sans-serif;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(194, 100, 45, 0.18);
+}
+
+.heading-display {
+  font-family: var(--font-space-grotesk), sans-serif;
+  letter-spacing: -0.03em;
+}
+
+.panel-surface {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+}
+
+.prose-paper {
+  color: var(--foreground);
+}
+
+.prose-paper h1,
+.prose-paper h2,
+.prose-paper h3,
+.prose-paper h4 {
+  font-family: var(--font-space-grotesk), sans-serif;
+  margin-top: 1.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose-paper p,
+.prose-paper li {
+  line-height: 1.72;
+}
+
+.prose-paper code {
+  background: rgba(15, 91, 102, 0.08);
+  border-radius: 0.35rem;
+  padding: 0.1rem 0.3rem;
+}
+
+.prose-paper pre {
+  overflow: auto;
+  background: #132228;
+  color: #f7f1eb;
+  border-radius: 1rem;
+  padding: 1rem;
+}
+
+.prose-paper blockquote {
+  border-left: 3px solid rgba(194, 100, 45, 0.35);
+  padding-left: 1rem;
+  color: color-mix(in oklab, var(--foreground) 75%, white);
+}
+
+.prose-paper .katex {
+  font-size: 1.02em;
+}
+
+.prose-paper .katex-display {
+  margin: 1rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.35rem;
+}
+
+.paper-scroll {
+  scrollbar-gutter: stable both-edges;
+  scrollbar-width: auto;
+  scrollbar-color: rgba(23, 34, 47, 0.34) rgba(23, 34, 47, 0.06);
+  overscroll-behavior: contain;
+}
+
+.paper-scroll::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.paper-scroll::-webkit-scrollbar-thumb {
+  background: rgba(23, 34, 47, 0.34);
+  border-radius: 999px;
+  border: 2px solid rgba(255, 248, 239, 0.9);
+}
+
+.paper-scroll::-webkit-scrollbar-track {
+  background: rgba(23, 34, 47, 0.06);
+  border-radius: 999px;
+}
+
+.text-layer span {
+  position: absolute;
+  white-space: pre;
+  transform-origin: 0% 0%;
+  line-height: 1;
+  color: transparent;
+  cursor: text;
+}
+
+.text-layer span::selection {
+  color: transparent;
+}
+
+.annotation-highlight {
+  background: rgba(255, 211, 83, 0.28);
+  border-radius: 0.25rem;
+}
+
+.annotation-underline {
+  border-bottom: 3px solid rgba(56, 126, 223, 0.92);
+  border-radius: 0.2rem;
+}
+
+.annotation-area {
+  border: 2px dashed rgba(194, 100, 45, 0.9);
+  background: rgba(194, 100, 45, 0.08);
+  border-radius: 0.45rem;
+}
+
+.annotation-note-link {
+  border: 1px solid rgba(15, 91, 102, 0.8);
+  background: rgba(15, 91, 102, 0.12);
+  border-radius: 0.45rem;
+}
+
+.selection-toolbar {
+  box-shadow: 0 16px 48px rgba(23, 34, 47, 0.18);
 }
