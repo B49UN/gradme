@@ -1,11 +1,13 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import "server-only";
 import { db, nowIso, parseJsonColumn, rawDb, stringifyJsonColumn } from "@/lib/db/client";
 import {
   aiArtifacts,
+  aiThreadMessages,
+  aiThreads,
   annotations,
   notes,
   paperChunks,
@@ -14,6 +16,7 @@ import {
   readingStates,
 } from "@/lib/db/schema";
 import { appPaths } from "@/lib/server/app-paths";
+import { listPaperMarkdownFiles } from "@/lib/ai/service";
 import {
   inferApiFormatFromBaseUrl,
   inferProviderFromBaseUrl,
@@ -28,6 +31,8 @@ import type {
   AiApiFormat,
   AnnotationRecord,
   AnnotationType,
+  AskThreadMessageRecord,
+  AskThreadRecord,
   NoteRecord,
   PaperDetail,
   PaperRecord,
@@ -71,6 +76,33 @@ function mapAnnotation(row: typeof annotations.$inferSelect): AnnotationRecord {
     color: row.color,
     selectedText: row.selectedText,
     selectionRef: parseJsonColumn(row.selectionRefJson, null),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function mapAskThread(row: typeof aiThreads.$inferSelect): AskThreadRecord {
+  return {
+    id: row.id,
+    paperId: row.paperId,
+    title: row.title,
+    contentMd: row.contentMd,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    messages: [],
+  };
+}
+
+function mapAskThreadMessage(
+  row: typeof aiThreadMessages.$inferSelect,
+): AskThreadMessageRecord {
+  return {
+    id: row.id,
+    threadId: row.threadId,
+    role: row.role as AskThreadMessageRecord["role"],
+    contentMd: row.contentMd,
+    selectionRef: parseJsonColumn(row.selectionRefJson, null),
+    artifactId: row.artifactId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -356,7 +388,16 @@ export async function getPaperDetail(paperId: string): Promise<PaperDetail | nul
     return null;
   }
 
-  const [sourceRows, annotationRows, noteRows, chunkRows, artifactRows, readingStateRow] =
+  const [
+    sourceRows,
+    annotationRows,
+    noteRows,
+    chunkRows,
+    artifactRows,
+    threadRows,
+    readingStateRow,
+    markdownFiles,
+  ] =
     await Promise.all([
       db.query.paperSources.findMany({
         where: eq(paperSources.paperId, paperId),
@@ -377,10 +418,37 @@ export async function getPaperDetail(paperId: string): Promise<PaperDetail | nul
         where: eq(aiArtifacts.paperId, paperId),
         orderBy: (fields, { desc: drizzleDesc }) => [drizzleDesc(fields.createdAt)],
       }),
+      db.query.aiThreads.findMany({
+        where: eq(aiThreads.paperId, paperId),
+        orderBy: (fields, { desc: drizzleDesc }) => [drizzleDesc(fields.updatedAt)],
+      }),
       db.query.readingStates.findFirst({
         where: eq(readingStates.paperId, paperId),
       }),
+      listPaperMarkdownFiles(paperId),
     ]);
+
+  const threadIds = new Set(threadRows.map((row) => row.id));
+  const threadMessageRows =
+    threadRows.length === 0
+      ? []
+      : await db.query.aiThreadMessages.findMany({
+          where: inArray(
+            aiThreadMessages.threadId,
+            threadRows.map((row) => row.id),
+          ),
+          orderBy: (fields, { asc }) => [asc(fields.createdAt)],
+        });
+  const groupedThreadMessages = threadMessageRows
+    .filter((row) => threadIds.has(row.threadId))
+    .reduce<Record<string, AskThreadMessageRecord[]>>((accumulator, row) => {
+      if (!accumulator[row.threadId]) {
+        accumulator[row.threadId] = [];
+      }
+
+      accumulator[row.threadId].push(mapAskThreadMessage(row));
+      return accumulator;
+    }, {});
 
   return {
     ...mapPaper(paperRow),
@@ -411,6 +479,11 @@ export async function getPaperDetail(paperId: string): Promise<PaperDetail | nul
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     })),
+    askThreads: threadRows.map((row) => ({
+      ...mapAskThread(row),
+      messages: groupedThreadMessages[row.id] ?? [],
+    })),
+    markdownFiles,
     readingState: readingStateRow
       ? {
           paperId: readingStateRow.paperId,
@@ -447,6 +520,7 @@ export async function getWorkspaceSnapshot(selectedPaperId?: string | null): Pro
             : (row.apiFormat as AiApiFormat | null) ?? inferApiFormatFromBaseUrl(row.baseUrl),
         model: row.model,
         supportsVision: row.supportsVision,
+        streamingEnabled: row.streamingEnabled ?? true,
         maxOutputTokens: row.maxTokens,
         reasoningEffort: normalizeReasoningEffort(row.reasoningEffort as ReasoningEffort | null),
         createdAt: row.createdAt,
@@ -515,6 +589,54 @@ export async function createNote(input: {
   }
 
   return mapNote(row);
+}
+
+export async function deleteAnnotation(paperId: string, annotationId: string) {
+  const annotation = await db.query.annotations.findFirst({
+    where: and(eq(annotations.id, annotationId), eq(annotations.paperId, paperId)),
+  });
+
+  if (!annotation) {
+    throw new Error("삭제할 주석을 찾지 못했습니다.");
+  }
+
+  const now = nowIso();
+
+  if (annotation.noteId) {
+    await db
+      .update(notes)
+      .set({
+        annotationId: null,
+        updatedAt: now,
+      })
+      .where(and(eq(notes.id, annotation.noteId), eq(notes.paperId, paperId)));
+  }
+
+  await db
+    .delete(annotations)
+    .where(and(eq(annotations.id, annotationId), eq(annotations.paperId, paperId)));
+
+  return { id: annotationId };
+}
+
+export async function deleteNote(paperId: string, noteId: string) {
+  const note = await db.query.notes.findFirst({
+    where: and(eq(notes.id, noteId), eq(notes.paperId, paperId)),
+  });
+
+  if (!note) {
+    throw new Error("삭제할 메모를 찾지 못했습니다.");
+  }
+
+  await db
+    .delete(annotations)
+    .where(and(eq(annotations.paperId, paperId), eq(annotations.noteId, noteId)));
+
+  await db
+    .delete(notes)
+    .where(and(eq(notes.id, noteId), eq(notes.paperId, paperId)));
+
+  return { id: noteId };
 }
 
 export async function readPaperAsset(paperId: string, asset: "pdf" | "thumbnail") {

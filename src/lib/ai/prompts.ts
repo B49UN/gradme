@@ -2,9 +2,9 @@ import type { FocusKind, PaperChunkRecord, PaperSelectionRef } from "@/lib/types
 
 export const PROMPT_VERSIONS = {
   summary: "summary_v3",
-  translation: "translation_v3",
-  qa: "qa_v3",
-  focus: "focus_v3",
+  translation: "translation_v4",
+  qa: "qa_v4",
+  focus: "focus_v4",
 } as const;
 
 const latexRules = `- 수식, 변수 관계, 미분 연산, 첨자/위첨자가 들어가는 표현은 반드시 LaTeX로 작성한다.
@@ -66,26 +66,32 @@ ${serializeChunks(chunks)}
   };
 }
 
-export function buildTranslationPrompt(chunks: PaperChunkRecord[]) {
+export function buildTranslationSectionPrompt(
+  chunk: PaperChunkRecord,
+  position: { index: number; total: number },
+) {
+  const heading = chunk.heading ? ` heading="${chunk.heading}"` : "";
+
   return {
     version: PROMPT_VERSIONS.translation,
     system: `당신은 기술 논문 전문 번역가다.
 
 규칙:
 - 출력은 Markdown만 사용한다.
-- 번역 대상은 영어 논문이며 결과는 한국어여야 한다.
+- 번역 대상은 영어 논문 발췌문이며 결과는 한국어여야 한다.
 - ${latexRules}
 - 수식, 변수 기호, 표/그림 번호, 참고문헌 인용 표기([1], Eq. (3), Fig. 2)는 원문 형태를 유지한다.
 - 전문 용어는 과도하게 의역하지 말고, 필요한 경우 한국어 뒤에 괄호로 영어 원문을 병기한다.
-- 문단 순서를 유지한다.
-- 원문에 없는 해설을 추가하지 않는다.
+- 문단, 목록, 식 순서를 유지한다.
+- 원문에 없는 해설, 요약, 페이지 헤더, "전문 번역" 같은 문서 전역 제목을 추가하지 않는다.
+- 제공된 발췌문만 번역하고 앞뒤 페이지 내용을 보충하지 않는다.
 
 출력 형식:
-## 전문 번역
-...`,
-    user: `<paper>
-${serializeChunks(chunks)}
-</paper>`,
+- 번역 본문만 출력한다.
+- 섹션 제목이 원문에 포함돼 있으면 함께 번역한다.`,
+    user: `<section page-start="${chunk.pageStart}" page-end="${chunk.pageEnd}" index="${position.index}" total="${position.total}"${heading}>
+${chunk.content}
+</section>`,
   };
 }
 
@@ -93,6 +99,7 @@ export function buildQaPrompt(
   question: string,
   chunks: PaperChunkRecord[],
   selection?: PaperSelectionRef | null,
+  threadContext?: string | null,
 ) {
   return {
     version: PROMPT_VERSIONS.qa,
@@ -102,6 +109,7 @@ export function buildQaPrompt(
 - 출력은 Markdown만 사용한다.
 - ${latexRules}
 - 반드시 논문 근거만 사용한다.
+- 이전 스레드 문맥이 주어지면 후속 질문 해석에만 사용하고, 답변 근거는 반드시 논문 발췌문에 둔다.
 - 추정, 일반 상식 보충, 근거 없는 계산은 금지한다.
 - 답변은 간결하지만 연구 판단에 충분한 밀도로 작성한다.
 - 각 주요 문장에는 [p.X] 또는 [p.X-Y]를 붙인다.
@@ -110,7 +118,7 @@ export function buildQaPrompt(
 ## 답변
 ## 근거
 ## 추가 확인 지점`,
-    user: `<question>${question}</question>
+    user: `${threadContext ? `<thread-context>\n${threadContext}\n</thread-context>\n` : ""}<question>${question}</question>
 ${serializeSelection(selection)}
 <paper>
 ${serializeChunks(chunks)}
@@ -126,7 +134,11 @@ const focusLabels: Record<FocusKind, string> = {
   limitations: "한계",
 };
 
-export function buildFocusPrompt(kind: FocusKind, chunks: PaperChunkRecord[]) {
+export function buildFocusPrompt(
+  kind: FocusKind,
+  chunks: PaperChunkRecord[],
+  threadContext?: string | null,
+) {
   return {
     version: PROMPT_VERSIONS.focus,
     system: `당신은 논문을 특정 관점에서 읽어주는 연구 어시스턴트다.
@@ -137,6 +149,7 @@ export function buildFocusPrompt(kind: FocusKind, chunks: PaperChunkRecord[]) {
 - 출력은 Markdown만 사용한다.
 - ${latexRules}
 - 반드시 논문 근거만 사용하고, 근거가 부족하면 그렇게 적는다.
+- 이전 스레드 문맥이 주어지면 후속 요청 해석에만 사용하고, 답변 내용은 논문 발췌문에 근거한다.
 - 각 불릿 또는 문단 끝에 [p.X] 또는 [p.X-Y]를 붙인다.
 - "방법론"은 절차, 입력, 모델/식, 실험 조건을 강조한다.
 - "실험 설정"은 데이터셋, baseline, metrics, hardware, split을 우선한다.
@@ -148,7 +161,7 @@ export function buildFocusPrompt(kind: FocusKind, chunks: PaperChunkRecord[]) {
 ## 관점 요약
 ## 세부 포인트
 ## 후속 질문`,
-    user: `<focus>${focusLabels[kind]}</focus>
+    user: `${threadContext ? `<thread-context>\n${threadContext}\n</thread-context>\n` : ""}<focus>${focusLabels[kind]}</focus>
 <paper>
 ${serializeChunks(chunks)}
 </paper>`,

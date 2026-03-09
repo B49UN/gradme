@@ -1,6 +1,6 @@
 import { generateTranslation } from "@/lib/ai/service";
 import { withRouteError } from "@/lib/server/http";
-import { profileSelectionSchema } from "@/lib/server/schemas";
+import { translationRequestSchema } from "@/lib/server/schemas";
 
 export const runtime = "nodejs";
 
@@ -11,7 +11,13 @@ export async function POST(
   const { id } = await params;
 
   return withRouteError(async () => {
-    const body = profileSelectionSchema.parse(await request.json());
-    return generateTranslation(id, body.profileId, body.force);
+    const body = translationRequestSchema.parse(await request.json());
+    return generateTranslation({
+      paperId: id,
+      profileId: body.profileId,
+      force: body.force,
+      pageStart: body.pageStart,
+      pageEnd: body.pageEnd,
+    });
   });
 }

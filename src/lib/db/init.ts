@@ -141,6 +141,7 @@ export function initializeDatabase(sqlite: Database.Database) {
       api_format TEXT NOT NULL DEFAULT 'responses',
       model TEXT NOT NULL,
       supports_vision INTEGER NOT NULL DEFAULT 0,
+      streaming_enabled INTEGER NOT NULL DEFAULT 1,
       temperature REAL NOT NULL DEFAULT 0.2,
       max_tokens INTEGER NOT NULL DEFAULT 1600,
       reasoning_effort TEXT,
@@ -162,6 +163,31 @@ export function initializeDatabase(sqlite: Database.Database) {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS ai_threads (
+      id TEXT PRIMARY KEY,
+      paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      content_md TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS ai_threads_paper_idx ON ai_threads(paper_id);
+
+    CREATE TABLE IF NOT EXISTS ai_thread_messages (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL REFERENCES ai_threads(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content_md TEXT NOT NULL,
+      selection_ref_json TEXT,
+      artifact_id TEXT REFERENCES ai_artifacts(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS ai_thread_messages_thread_idx
+      ON ai_thread_messages(thread_id, created_at);
 
     CREATE TABLE IF NOT EXISTS tags (
       id TEXT PRIMARY KEY,
@@ -209,5 +235,6 @@ export function initializeDatabase(sqlite: Database.Database) {
 
   ensureColumn(sqlite, "ai_profiles", "api_format", "TEXT NOT NULL DEFAULT 'responses'");
   ensureColumn(sqlite, "ai_profiles", "reasoning_effort", "TEXT");
+  ensureColumn(sqlite, "ai_profiles", "streaming_enabled", "INTEGER NOT NULL DEFAULT 1");
   normalizeLegacyAiProfiles(sqlite);
 }

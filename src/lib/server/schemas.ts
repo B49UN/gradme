@@ -46,6 +46,7 @@ export const modelProfileSchema = z.object({
   model: z.string().min(1),
   apiKey: z.string().trim().optional().default(""),
   supportsVision: z.boolean(),
+  streamingEnabled: z.boolean().optional().default(true),
   maxOutputTokens: z.number().int().min(256).max(128_000),
   reasoningEffort: z.enum(["none", "minimal", "low", "medium", "high"]).nullable().optional(),
 }).superRefine((value, context) => {
@@ -61,6 +62,7 @@ export const modelProfileSchema = z.object({
 export const questionSchema = z.object({
   profileId: z.string().uuid(),
   question: z.string().min(1),
+  threadId: z.string().uuid().nullable().optional(),
   selectionRef: selectionRefSchema.nullable().optional(),
   selectionPreviewDataUrl: z.string().startsWith("data:image/").nullable().optional(),
   focusKind: z
@@ -78,6 +80,36 @@ export const questionSchema = z.object({
 export const profileSelectionSchema = z.object({
   profileId: z.string().uuid(),
   force: z.boolean().optional(),
+});
+
+export const translationRequestSchema = profileSelectionSchema.extend({
+  pageStart: z.number().int().min(1).optional(),
+  pageEnd: z.number().int().min(1).optional(),
+}).superRefine((value, context) => {
+  if ((value.pageStart ?? null) === null && (value.pageEnd ?? null) === null) {
+    return;
+  }
+
+  if ((value.pageStart ?? null) === null || (value.pageEnd ?? null) === null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "페이지 범위는 시작과 끝을 함께 보내야 합니다.",
+      path: ["pageStart"],
+    });
+    return;
+  }
+
+  if (value.pageStart! > value.pageEnd!) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "페이지 시작은 끝보다 작거나 같아야 합니다.",
+      path: ["pageStart"],
+    });
+  }
+});
+
+export const threadCreateSchema = z.object({
+  title: z.string().min(1).max(120).optional(),
 });
 
 export const urlImportSchema = z.object({

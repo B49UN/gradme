@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildFocusPrompt, buildQaPrompt, buildSummaryPrompt } from "@/lib/ai/prompts";
+import {
+  buildFocusPrompt,
+  buildQaPrompt,
+  buildSummaryPrompt,
+  buildTranslationSectionPrompt,
+} from "@/lib/ai/prompts";
 import type { PaperChunkRecord } from "@/lib/types";
 
 const chunks: PaperChunkRecord[] = [
@@ -31,13 +36,25 @@ describe("prompt catalog", () => {
       page: 1,
       rects: [{ left: 0.1, top: 0.1, width: 0.3, height: 0.05 }],
       selectedText: "aerodynamic estimation performance",
-    });
+    }, "# 이전 스레드");
     expect(prompt.user).toContain("<selection type=\"text\"");
     expect(prompt.user).toContain("<chunk");
+    expect(prompt.user).toContain("<thread-context>");
   });
 
   it("labels focus prompts by perspective", () => {
-    const prompt = buildFocusPrompt("results", chunks);
+    const prompt = buildFocusPrompt("results", chunks, "# 이전 스레드");
     expect(prompt.system).toContain("현재 분석 관점: 주요 결과");
+    expect(prompt.user).toContain("<thread-context>");
+  });
+
+  it("builds translation prompts per section", () => {
+    const prompt = buildTranslationSectionPrompt(chunks[0], {
+      index: 1,
+      total: 4,
+    });
+    expect(prompt.version).toBe("translation_v4");
+    expect(prompt.user).toContain("<section page-start=\"1\"");
+    expect(prompt.system).toContain("문서 전역 제목");
   });
 });

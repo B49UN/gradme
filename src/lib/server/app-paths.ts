@@ -30,6 +30,8 @@ export const appPaths = {
   pdfDir: path.join(resolveBaseDir(), "pdfs"),
   thumbnailDir: path.join(resolveBaseDir(), "thumbnails"),
   artifactDir: path.join(resolveBaseDir(), "artifacts"),
+  markdownDir: path.join(resolveBaseDir(), "markdown"),
+  threadDir: path.join(resolveBaseDir(), "markdown"),
 };
 
 export function ensureAppDirectories() {
@@ -38,6 +40,8 @@ export function ensureAppDirectories() {
     appPaths.pdfDir,
     appPaths.thumbnailDir,
     appPaths.artifactDir,
+    appPaths.markdownDir,
+    appPaths.threadDir,
   ]) {
     fs.mkdirSync(directory, { recursive: true });
   }

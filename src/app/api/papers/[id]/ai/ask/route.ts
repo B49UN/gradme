@@ -29,7 +29,7 @@ export async function POST(
         paperId: id,
         profileId: body.profileId,
         kind: body.focusKind,
-        force: body.force,
+        threadId: body.threadId,
       });
     }
 
@@ -38,7 +38,7 @@ export async function POST(
       profileId: body.profileId,
       question: body.question,
       selection: selectionRef,
-      force: body.force,
+      threadId: body.threadId,
     });
   });
 }

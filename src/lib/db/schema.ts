@@ -89,6 +89,7 @@ export const aiProfiles = sqliteTable("ai_profiles", {
   apiFormat: text("api_format").notNull().default("responses"),
   model: text("model").notNull(),
   supportsVision: integer("supports_vision", { mode: "boolean" }).notNull().default(false),
+  streamingEnabled: integer("streaming_enabled", { mode: "boolean" }).notNull().default(true),
   temperature: real("temperature").notNull().default(0.2),
   maxTokens: integer("max_tokens").notNull().default(1600),
   reasoningEffort: text("reasoning_effort"),
@@ -113,6 +114,30 @@ export const aiArtifacts = sqliteTable("ai_artifacts", {
   updatedAt: text("updated_at").notNull(),
 }, (table) => [
   index("ai_artifacts_paper_kind_idx").on(table.paperId, table.kind),
+]);
+
+export const aiThreads = sqliteTable("ai_threads", {
+  id: text("id").primaryKey(),
+  paperId: text("paper_id").notNull().references(() => papers.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  contentMd: text("content_md").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  index("ai_threads_paper_idx").on(table.paperId),
+]);
+
+export const aiThreadMessages = sqliteTable("ai_thread_messages", {
+  id: text("id").primaryKey(),
+  threadId: text("thread_id").notNull().references(() => aiThreads.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  contentMd: text("content_md").notNull(),
+  selectionRefJson: text("selection_ref_json"),
+  artifactId: text("artifact_id").references(() => aiArtifacts.id, { onDelete: "set null" }),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  index("ai_thread_messages_thread_idx").on(table.threadId, table.createdAt),
 ]);
 
 export const tags = sqliteTable("tags", {
@@ -152,6 +177,8 @@ export const settings = sqliteTable("settings", {
 export const schema = {
   aiArtifacts,
   aiProfiles,
+  aiThreadMessages,
+  aiThreads,
   annotations,
   collections,
   notes,

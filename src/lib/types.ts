@@ -7,6 +7,7 @@ export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high";
 export type AiArtifactKind =
   | "summary"
   | "translation"
+  | "translation-range"
   | "qa"
   | "focus-methodology"
   | "focus-experimental-setup"
@@ -108,6 +109,7 @@ export type AiProfileRecord = {
   apiFormat: AiApiFormat;
   model: string;
   supportsVision: boolean;
+  streamingEnabled: boolean;
   maxOutputTokens: number;
   reasoningEffort: ReasoningEffort | null;
   createdAt: string;
@@ -129,6 +131,37 @@ export type AiArtifactRecord = {
   updatedAt: string;
 };
 
+export type AskThreadMessageRecord = {
+  id: string;
+  threadId: string;
+  role: "user" | "assistant";
+  contentMd: string;
+  selectionRef: PaperSelectionRef | null;
+  artifactId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AskThreadRecord = {
+  id: string;
+  paperId: string;
+  title: string;
+  contentMd: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: AskThreadMessageRecord[];
+};
+
+export type PaperMarkdownFileRecord = {
+  id: string;
+  kind: "thread" | "translation" | "translation-range";
+  title: string;
+  fileName: string;
+  path: string;
+  targetId: string;
+  updatedAt: string;
+};
+
 export type ReadingStateRecord = {
   paperId: string;
   currentPage: number;
@@ -142,6 +175,8 @@ export type PaperDetail = PaperRecord & {
   notes: NoteRecord[];
   chunks: PaperChunkRecord[];
   artifacts: AiArtifactRecord[];
+  askThreads: AskThreadRecord[];
+  markdownFiles: PaperMarkdownFileRecord[];
   readingState: ReadingStateRecord | null;
 };
 
