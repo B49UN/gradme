@@ -1,5 +1,13 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import {
+  GoogleGenAI,
+  ThinkingLevel,
+  createPartFromBase64,
+  createPartFromText,
+  createPartFromUri,
+  createUserContent,
+} from "@google/genai";
 import OpenAI from "openai";
 import PQueue from "p-queue";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -9,6 +17,7 @@ import {
   aiArtifacts,
   aiProfiles,
   paperChunks,
+  papers,
 } from "@/lib/db/schema";
 import {
   buildFocusPrompt,
@@ -40,12 +49,16 @@ import { stableStringify } from "@/lib/utils";
 const aiQueue = new PQueue({ concurrency: 1 });
 
 function mapProfile(row: typeof aiProfiles.$inferSelect): AiProfileRecord {
+  const provider = inferProviderFromBaseUrl(row.baseUrl);
   return {
     id: row.id,
     name: row.name,
-    provider: inferProviderFromBaseUrl(row.baseUrl),
+    provider,
     baseUrl: normalizeAiBaseUrl(row.baseUrl),
-    apiFormat: (row.apiFormat as AiApiFormat | null) ?? inferApiFormatFromBaseUrl(row.baseUrl),
+    apiFormat:
+      provider === "google-gemini"
+        ? "gemini-native"
+        : (row.apiFormat as AiApiFormat | null) ?? inferApiFormatFromBaseUrl(row.baseUrl),
     model: row.model,
     supportsVision: row.supportsVision,
     maxOutputTokens: row.maxTokens,
@@ -109,6 +122,28 @@ async function getClient(profileId: string) {
   };
 }
 
+async function getProfileAccess(profileId: string) {
+  const row = await db.query.aiProfiles.findFirst({
+    where: eq(aiProfiles.id, profileId),
+  });
+
+  if (!row) {
+    throw new Error("선택한 모델 프로필을 찾을 수 없습니다.");
+  }
+
+  const apiKey = await readApiKey(profileId);
+
+  if (!apiKey) {
+    throw new Error("저장된 API 키가 없습니다. 모델 설정을 다시 저장하세요.");
+  }
+
+  return {
+    row,
+    apiKey,
+    profile: mapProfile(row),
+  };
+}
+
 async function createOrReuseArtifact(args: {
   paperId: string;
   kind: AiArtifactKind;
@@ -127,6 +162,7 @@ async function createOrReuseArtifact(args: {
       eq(aiArtifacts.paperId, args.paperId),
       eq(aiArtifacts.kind, args.kind),
       eq(aiArtifacts.promptVersion, args.promptVersion),
+      eq(aiArtifacts.profileId, args.profileId),
       eq(aiArtifacts.model, args.model),
       selectionHash === null
         ? sql`${aiArtifacts.selectionHash} IS NULL`
@@ -252,6 +288,55 @@ async function readSelectionImage(selection: PaperSelectionRef | null | undefine
   return `data:image/png;base64,${buffer.toString("base64")}`;
 }
 
+function dataUrlToInlineData(dataUrl: string) {
+  const [metadata, data] = dataUrl.split(",", 2);
+  const mimeType = metadata.match(/^data:(.*?);base64$/)?.[1] ?? "image/png";
+
+  if (!data) {
+    return null;
+  }
+
+  return createPartFromBase64(data, mimeType);
+}
+
+async function getPaperStoragePath(paperId: string) {
+  const row = await db.query.papers.findFirst({
+    where: eq(papers.id, paperId),
+    columns: {
+      storagePath: true,
+    },
+  });
+
+  if (!row) {
+    throw new Error("논문 파일을 찾을 수 없습니다.");
+  }
+
+  return row.storagePath;
+}
+
+function toGeminiThinkingConfig(reasoningEffort: ReasoningEffort | null | undefined) {
+  if (!reasoningEffort) {
+    return undefined;
+  }
+
+  if (reasoningEffort === "none") {
+    return {
+      thinkingBudget: 0,
+    };
+  }
+
+  const thinkingLevelMap = {
+    minimal: ThinkingLevel.MINIMAL,
+    low: ThinkingLevel.LOW,
+    medium: ThinkingLevel.MEDIUM,
+    high: ThinkingLevel.HIGH,
+  } as const;
+
+  return {
+    thinkingLevel: thinkingLevelMap[reasoningEffort],
+  };
+}
+
 function extractResponseOutputText(response: OpenAI.Responses.Response) {
   if (response.output_text?.trim()) {
     return response.output_text.trim();
@@ -277,12 +362,14 @@ function extractResponseOutputText(response: OpenAI.Responses.Response) {
 }
 
 async function runModelRequest(args: {
+  paperId: string;
   profileId: string;
   system: string;
   user: string;
   selection?: PaperSelectionRef | null;
 }) {
-  const { client, profile } = await getClient(args.profileId);
+  const access = await getProfileAccess(args.profileId);
+  const { profile } = access;
   const imageDataUrl = await readSelectionImage(args.selection);
 
   if (args.selection?.type === "area" && !profile.supportsVision) {
@@ -291,7 +378,48 @@ async function runModelRequest(args: {
 
   let content = "";
 
-  if (profile.apiFormat === "chat-completions") {
+  if (profile.provider === "google-gemini") {
+    const ai = new GoogleGenAI({
+      apiKey: access.apiKey,
+    });
+    const paperPath = await getPaperStoragePath(args.paperId);
+    const uploaded = await ai.files.upload({
+      file: paperPath,
+      config: {
+        mimeType: "application/pdf",
+      },
+    });
+
+    try {
+      const parts = [createPartFromText(args.user)];
+
+      if (uploaded.uri) {
+        parts.push(createPartFromUri(uploaded.uri, uploaded.mimeType ?? "application/pdf"));
+      }
+
+      const imagePart = imageDataUrl ? dataUrlToInlineData(imageDataUrl) : null;
+      if (imagePart) {
+        parts.push(imagePart);
+      }
+
+      const response = await ai.models.generateContent({
+        model: profile.model,
+        contents: createUserContent(parts),
+        config: {
+          systemInstruction: args.system,
+          maxOutputTokens: profile.maxOutputTokens,
+          thinkingConfig: toGeminiThinkingConfig(profile.reasoningEffort),
+        },
+      });
+
+      content = response.text?.trim() ?? "";
+    } finally {
+      if (uploaded.name) {
+        await ai.files.delete({ name: uploaded.name }).catch(() => undefined);
+      }
+    }
+  } else if (profile.apiFormat === "chat-completions") {
+    const { client } = await getClient(args.profileId);
     const response = await client.chat.completions.create({
       model: profile.model,
       max_tokens: profile.maxOutputTokens,
@@ -326,6 +454,7 @@ async function runModelRequest(args: {
 
     content = response.choices[0]?.message?.content?.trim() ?? "";
   } else {
+    const { client } = await getClient(args.profileId);
     const input: string | OpenAI.Responses.ResponseInput = imageDataUrl
       ? [
           {
@@ -393,8 +522,12 @@ export async function saveProfile(input: {
 }) {
   const now = nowIso();
   const id = input.id ?? crypto.randomUUID();
-  const baseUrl = normalizeAiBaseUrl(input.baseUrl);
-  const providerDefaults = getProviderDefaults(inferProviderFromBaseUrl(baseUrl));
+  const inferredProvider = inferProviderFromBaseUrl(input.baseUrl);
+  const providerDefaults = getProviderDefaults(inferredProvider);
+  const baseUrl =
+    inferredProvider === "google-gemini"
+      ? providerDefaults.baseUrl
+      : normalizeAiBaseUrl(input.baseUrl);
   const existing = await db.query.aiProfiles.findFirst({
     where: eq(aiProfiles.id, id),
   });
@@ -406,7 +539,7 @@ export async function saveProfile(input: {
         name: input.name,
         baseUrl,
         apiFormat:
-          providerDefaults.provider === "google-ai-studio" ? "chat-completions" : input.apiFormat,
+          providerDefaults.provider === "google-gemini" ? "gemini-native" : input.apiFormat,
         model: input.model,
         supportsVision: input.supportsVision,
         maxTokens: input.maxOutputTokens,
@@ -420,7 +553,7 @@ export async function saveProfile(input: {
       name: input.name,
       baseUrl,
       apiFormat:
-        providerDefaults.provider === "google-ai-studio" ? "chat-completions" : input.apiFormat,
+        providerDefaults.provider === "google-gemini" ? "gemini-native" : input.apiFormat,
       model: input.model,
       supportsVision: input.supportsVision,
       temperature: 0.2,
@@ -488,7 +621,7 @@ export async function generateSummary(paperId: string, profileId: string, force 
   return aiQueue.add(async () => {
     const chunks = await searchRelevantChunks(paperId, "summary abstract methodology results", 10);
     const prompt = buildSummaryPrompt(chunks);
-    const { profile } = await getClient(profileId);
+    const { profile } = await getProfileAccess(profileId);
     const artifact = await createOrReuseArtifact({
       paperId,
       kind: "summary",
@@ -504,6 +637,7 @@ export async function generateSummary(paperId: string, profileId: string, force 
 
     try {
       const completion = await runModelRequest({
+        paperId,
         profileId,
         system: prompt.system,
         user: prompt.user,
@@ -527,7 +661,7 @@ export async function generateTranslation(paperId: string, profileId: string, fo
     });
     const mappedChunks = chunks.map(mapChunk);
     const prompt = buildTranslationPrompt(mappedChunks);
-    const { profile } = await getClient(profileId);
+    const { profile } = await getProfileAccess(profileId);
     const artifact = await createOrReuseArtifact({
       paperId,
       kind: "translation",
@@ -543,6 +677,7 @@ export async function generateTranslation(paperId: string, profileId: string, fo
 
     try {
       const completion = await runModelRequest({
+        paperId,
         profileId,
         system: prompt.system,
         user: prompt.user,
@@ -577,7 +712,7 @@ export async function generateQa(args: {
     const selection = await ensureAreaSelectionPath(args.selection);
     const chunks = await searchRelevantChunks(args.paperId, args.question, 8);
     const prompt = buildQaPrompt(args.question, chunks, selection);
-    const { profile } = await getClient(args.profileId);
+    const { profile } = await getProfileAccess(args.profileId);
     const artifact = await createOrReuseArtifact({
       paperId: args.paperId,
       kind: "qa",
@@ -594,6 +729,7 @@ export async function generateQa(args: {
 
     try {
       const completion = await runModelRequest({
+        paperId: args.paperId,
         profileId: args.profileId,
         system: prompt.system,
         user: prompt.user,
@@ -626,7 +762,7 @@ export async function generateFocusAnalysis(args: {
     }[args.kind];
     const chunks = await searchRelevantChunks(args.paperId, query, 8);
     const prompt = buildFocusPrompt(args.kind, chunks);
-    const { profile } = await getClient(args.profileId);
+    const { profile } = await getProfileAccess(args.profileId);
     const artifact = await createOrReuseArtifact({
       paperId: args.paperId,
       kind: focusKindToArtifactKind[args.kind],
@@ -642,6 +778,7 @@ export async function generateFocusAnalysis(args: {
 
     try {
       const completion = await runModelRequest({
+        paperId: args.paperId,
         profileId: args.profileId,
         system: prompt.system,
         user: prompt.user,

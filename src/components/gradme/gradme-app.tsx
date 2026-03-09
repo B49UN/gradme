@@ -87,11 +87,14 @@ const EMPTY_PROFILES: ProfileOption[] = [];
 function latestArtifact(
   artifacts: AiArtifactRecord[],
   kind: AiArtifactRecord["kind"],
+  profileId?: string,
   promptVersion?: string,
 ) {
   return artifacts.find(
     (artifact) =>
-      artifact.kind === kind && (!promptVersion || artifact.promptVersion === promptVersion),
+      artifact.kind === kind &&
+      (!profileId || artifact.profileId === profileId) &&
+      (!promptVersion || artifact.promptVersion === promptVersion),
   );
 }
 
@@ -246,7 +249,7 @@ function SettingsDialog({
     setMaxOutputTokens(String(defaults.maxOutputTokens));
     setReasoningEffort(defaults.reasoningEffort);
     if (!preserveName || !name.trim()) {
-      setName(nextProvider === "openai" ? "OpenAI" : "Google AI Studio");
+      setName(nextProvider === "openai" ? "OpenAI" : "Google Gemini");
     }
   }
 
@@ -293,8 +296,7 @@ function SettingsDialog({
         <DialogHeader>
           <DialogTitle>모델 프로필 설정</DialogTitle>
           <DialogDescription>
-            OpenAI와 Google AI Studio를 모두 지원합니다. Base URL에는 엔드포인트 전체가 아니라
-            API root만 넣으세요.
+            OpenAI는 Responses API를, Google은 Gemini native SDK를 사용합니다.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 md:grid-cols-2">
@@ -330,7 +332,7 @@ function SettingsDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="openai">OpenAI</SelectItem>
-                <SelectItem value="google-ai-studio">Google AI Studio</SelectItem>
+                <SelectItem value="google-gemini">Google Gemini</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -344,25 +346,31 @@ function SettingsDialog({
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label>Base URL</Label>
-            <Input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
+            <Input
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              readOnly={provider === "google-gemini"}
+            />
             <p className="text-xs text-[var(--muted)]">{providerDefaults.providerDescription}</p>
           </div>
           <div className="space-y-2">
             <Label>API 형식</Label>
-            <Select
-              value={apiFormat}
-              onValueChange={(value) => setApiFormat(value as AiApiFormat)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {provider === "openai" ? (
+            {provider === "openai" ? (
+              <Select
+                value={apiFormat}
+                onValueChange={(value) => setApiFormat(value as AiApiFormat)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
                   <SelectItem value="responses">Responses API</SelectItem>
-                ) : null}
-                <SelectItem value="chat-completions">Chat Completions</SelectItem>
-              </SelectContent>
-            </Select>
+                  <SelectItem value="chat-completions">Chat Completions</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input value="Gemini Native SDK" readOnly />
+            )}
           </div>
           <div className="space-y-2 md:col-span-2">
             <Label>API Key</Label>
@@ -406,7 +414,6 @@ function SettingsDialog({
                 <SelectItem value="low">low</SelectItem>
                 <SelectItem value="medium">medium</SelectItem>
                 <SelectItem value="high">high</SelectItem>
-                <SelectItem value="xhigh">xhigh</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -787,17 +794,23 @@ export function GradMeApp() {
   }, [libraryQuery, workspaceQuery.data?.papers]);
 
   const summaryArtifact = selectedPaper
-    ? latestArtifact(selectedPaper.artifacts, "summary", PROMPT_VERSIONS.summary)
+    ? latestArtifact(selectedPaper.artifacts, "summary", activeProfileId, PROMPT_VERSIONS.summary)
     : null;
   const translationArtifact = selectedPaper
-    ? latestArtifact(selectedPaper.artifacts, "translation", PROMPT_VERSIONS.translation)
+    ? latestArtifact(
+        selectedPaper.artifacts,
+        "translation",
+        activeProfileId,
+        PROMPT_VERSIONS.translation,
+      )
     : null;
   const latestQaArtifact = selectedPaper
-    ? latestArtifact(selectedPaper.artifacts, "qa", PROMPT_VERSIONS.qa)
+    ? latestArtifact(selectedPaper.artifacts, "qa", activeProfileId, PROMPT_VERSIONS.qa)
     : null;
   const latestFocusArtifact = selectedPaper
     ? selectedPaper.artifacts.find(
         (artifact) =>
+          artifact.profileId === activeProfileId &&
           artifact.promptVersion === PROMPT_VERSIONS.focus &&
           (artifact.kind === focusKindToArtifactKind("methodology") ||
             artifact.kind === focusKindToArtifactKind("experimental-setup") ||

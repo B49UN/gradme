@@ -1,9 +1,9 @@
 export type PaperStatus = "new" | "reading" | "reviewed" | "archived";
 export type PaperSourceType = "upload" | "url" | "doi" | "arxiv";
 export type AnnotationType = "highlight" | "underline" | "area" | "note-link";
-export type AiProvider = "openai" | "google-ai-studio";
-export type AiApiFormat = "responses" | "chat-completions";
-export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type AiProvider = "openai" | "google-gemini";
+export type AiApiFormat = "responses" | "chat-completions" | "gemini-native";
+export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high";
 export type AiArtifactKind =
   | "summary"
   | "translation"

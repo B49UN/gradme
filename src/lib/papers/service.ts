@@ -433,19 +433,26 @@ export async function getWorkspaceSnapshot(selectedPaperId?: string | null): Pro
   return {
     papers: paperList,
     selectedPaper,
-    profiles: profiles.map((row) => ({
-      id: row.id,
-      name: row.name,
-      provider: inferProviderFromBaseUrl(row.baseUrl),
-      baseUrl: normalizeAiBaseUrl(row.baseUrl),
-      apiFormat: (row.apiFormat as AiApiFormat | null) ?? inferApiFormatFromBaseUrl(row.baseUrl),
-      model: row.model,
-      supportsVision: row.supportsVision,
-      maxOutputTokens: row.maxTokens,
-      reasoningEffort: normalizeReasoningEffort(row.reasoningEffort as ReasoningEffort | null),
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    })),
+    profiles: profiles.map((row) => {
+      const provider = inferProviderFromBaseUrl(row.baseUrl);
+
+      return {
+        id: row.id,
+        name: row.name,
+        provider,
+        baseUrl: normalizeAiBaseUrl(row.baseUrl),
+        apiFormat:
+          provider === "google-gemini"
+            ? "gemini-native"
+            : (row.apiFormat as AiApiFormat | null) ?? inferApiFormatFromBaseUrl(row.baseUrl),
+        model: row.model,
+        supportsVision: row.supportsVision,
+        maxOutputTokens: row.maxTokens,
+        reasoningEffort: normalizeReasoningEffort(row.reasoningEffort as ReasoningEffort | null),
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    }),
   };
 }
 

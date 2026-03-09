@@ -14,6 +14,9 @@ describe("AI profile utils", () => {
     expect(normalizeAiBaseUrl("https://example.com/openai/v1/chat/completions")).toBe(
       "https://example.com/openai/v1",
     );
+    expect(normalizeAiBaseUrl("https://generativelanguage.googleapis.com/v1beta/openai")).toBe(
+      "https://generativelanguage.googleapis.com",
+    );
   });
 
   it("infers the intended API format from the URL suffix", () => {
@@ -22,15 +25,15 @@ describe("AI profile utils", () => {
       "chat-completions",
     );
     expect(inferApiFormatFromBaseUrl("https://api.openai.com/v1")).toBe("responses");
-    expect(inferApiFormatFromBaseUrl("https://generativelanguage.googleapis.com/v1beta/openai")).toBe(
-      "chat-completions",
+    expect(inferApiFormatFromBaseUrl("https://generativelanguage.googleapis.com")).toBe(
+      "gemini-native",
     );
   });
 
-  it("recognizes google ai studio endpoints and presets", () => {
+  it("recognizes native gemini endpoints and presets", () => {
     expect(
-      inferProviderFromBaseUrl("https://generativelanguage.googleapis.com/v1beta/openai"),
-    ).toBe("google-ai-studio");
-    expect(getProviderDefaults("google-ai-studio").model).toBe("gemini-2.5-flash");
+      inferProviderFromBaseUrl("https://generativelanguage.googleapis.com"),
+    ).toBe("google-gemini");
+    expect(getProviderDefaults("google-gemini").apiFormat).toBe("gemini-native");
   });
 });

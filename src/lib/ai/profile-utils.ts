@@ -2,7 +2,7 @@ import type { AiApiFormat, AiProvider, ReasoningEffort } from "@/lib/types";
 
 const endpointSuffixes = ["/responses", "/chat/completions"] as const;
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
-const GOOGLE_AI_STUDIO_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
+const GOOGLE_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 
 export function inferProviderFromBaseUrl(baseUrl: string): AiProvider {
   const normalized = baseUrl.trim();
@@ -11,7 +11,7 @@ export function inferProviderFromBaseUrl(baseUrl: string): AiProvider {
     const parsed = new URL(normalized);
 
     if (parsed.hostname === "generativelanguage.googleapis.com") {
-      return "google-ai-studio";
+      return "google-gemini";
     }
   } catch {
     return "openai";
@@ -28,25 +28,25 @@ export function inferApiFormatFromBaseUrl(baseUrl: string): AiApiFormat {
     return "chat-completions";
   }
 
-  if (provider === "google-ai-studio") {
-    return "chat-completions";
+  if (provider === "google-gemini") {
+    return "gemini-native";
   }
 
   return "responses";
 }
 
 export function getProviderDefaults(provider: AiProvider) {
-  if (provider === "google-ai-studio") {
+  if (provider === "google-gemini") {
     return {
       provider,
-      baseUrl: GOOGLE_AI_STUDIO_BASE_URL,
-      apiFormat: "chat-completions" as const,
+      baseUrl: GOOGLE_GEMINI_BASE_URL,
+      apiFormat: "gemini-native" as const,
       model: "gemini-2.5-flash",
       supportsVision: true,
       maxOutputTokens: 8192,
       reasoningEffort: "medium" as ReasoningEffort,
       apiKeyPlaceholder: "AIza...",
-      providerDescription: "Google AI Studio API key + Gemini OpenAI-compatible Chat Completions",
+      providerDescription: "Google AI Studio API key + Gemini native SDK",
     };
   }
 
@@ -64,6 +64,10 @@ export function getProviderDefaults(provider: AiProvider) {
 }
 
 export function normalizeAiBaseUrl(baseUrl: string) {
+  if (inferProviderFromBaseUrl(baseUrl) === "google-gemini") {
+    return GOOGLE_GEMINI_BASE_URL;
+  }
+
   const parsed = new URL(baseUrl.trim());
   let pathname = parsed.pathname.replace(/\/+$/, "");
 
@@ -83,5 +87,13 @@ export function normalizeAiBaseUrl(baseUrl: string) {
 export function normalizeReasoningEffort(
   value: ReasoningEffort | null | undefined,
 ): ReasoningEffort | null {
-  return value ?? null;
+  if (!value) {
+    return null;
+  }
+
+  if (value === "none" || value === "minimal" || value === "low" || value === "medium" || value === "high") {
+    return value;
+  }
+
+  return "high";
 }

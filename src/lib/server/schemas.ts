@@ -42,12 +42,12 @@ export const modelProfileSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().min(1).max(100),
   baseUrl: z.string().url(),
-  apiFormat: z.enum(["responses", "chat-completions"]).default("responses"),
+  apiFormat: z.enum(["responses", "chat-completions", "gemini-native"]).default("responses"),
   model: z.string().min(1),
   apiKey: z.string().trim().optional().default(""),
   supportsVision: z.boolean(),
   maxOutputTokens: z.number().int().min(256).max(128_000),
-  reasoningEffort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh"]).nullable().optional(),
+  reasoningEffort: z.enum(["none", "minimal", "low", "medium", "high"]).nullable().optional(),
 }).superRefine((value, context) => {
   if (!value.id && value.apiKey.length === 0) {
     context.addIssue({

@@ -31,12 +31,27 @@ function normalizeLegacyAiProfiles(sqlite: Database.Database) {
       let apiFormat = row.api_format || "responses";
       let baseUrl = trimmed;
 
-      if (trimmed.endsWith("/chat/completions")) {
-        apiFormat = "chat-completions";
-        baseUrl = trimmed.slice(0, -"/chat/completions".length) || "/";
-      } else if (trimmed.endsWith("/responses")) {
-        apiFormat = "responses";
-        baseUrl = trimmed.slice(0, -"/responses".length) || "/";
+      try {
+        const parsed = new URL(trimmed);
+
+        if (parsed.hostname === "generativelanguage.googleapis.com") {
+          baseUrl = "https://generativelanguage.googleapis.com";
+          apiFormat = "gemini-native";
+        } else if (trimmed.endsWith("/chat/completions")) {
+          apiFormat = "chat-completions";
+          baseUrl = trimmed.slice(0, -"/chat/completions".length) || "/";
+        } else if (trimmed.endsWith("/responses")) {
+          apiFormat = "responses";
+          baseUrl = trimmed.slice(0, -"/responses".length) || "/";
+        }
+      } catch {
+        if (trimmed.endsWith("/chat/completions")) {
+          apiFormat = "chat-completions";
+          baseUrl = trimmed.slice(0, -"/chat/completions".length) || "/";
+        } else if (trimmed.endsWith("/responses")) {
+          apiFormat = "responses";
+          baseUrl = trimmed.slice(0, -"/responses".length) || "/";
+        }
       }
 
       if (baseUrl !== row.base_url || apiFormat !== row.api_format) {
