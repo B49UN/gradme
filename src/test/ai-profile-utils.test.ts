@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { inferApiFormatFromBaseUrl, normalizeAiBaseUrl } from "@/lib/ai/profile-utils";
+import {
+  getProviderDefaults,
+  inferApiFormatFromBaseUrl,
+  inferProviderFromBaseUrl,
+  normalizeAiBaseUrl,
+} from "@/lib/ai/profile-utils";
 
 describe("AI profile utils", () => {
   it("normalizes endpoint URLs back to the API root", () => {
@@ -17,5 +22,15 @@ describe("AI profile utils", () => {
       "chat-completions",
     );
     expect(inferApiFormatFromBaseUrl("https://api.openai.com/v1")).toBe("responses");
+    expect(inferApiFormatFromBaseUrl("https://generativelanguage.googleapis.com/v1beta/openai")).toBe(
+      "chat-completions",
+    );
+  });
+
+  it("recognizes google ai studio endpoints and presets", () => {
+    expect(
+      inferProviderFromBaseUrl("https://generativelanguage.googleapis.com/v1beta/openai"),
+    ).toBe("google-ai-studio");
+    expect(getProviderDefaults("google-ai-studio").model).toBe("gemini-2.5-flash");
   });
 });

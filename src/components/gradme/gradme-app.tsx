@@ -43,9 +43,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { fetchJson, postJson } from "@/lib/client/api";
 import { PROMPT_VERSIONS } from "@/lib/ai/prompts";
+import {
+  getProviderDefaults,
+  inferProviderFromBaseUrl,
+} from "@/lib/ai/profile-utils";
 import { cn, formatAuthors, formatDateTime, truncate } from "@/lib/utils";
 import type {
   AiApiFormat,
+  AiProvider,
   AiArtifactRecord,
   AnnotationRecord,
   FocusKind,
@@ -59,6 +64,7 @@ import type {
 type ProfileOption = {
   id: string;
   name: string;
+  provider: AiProvider;
   baseUrl: string;
   apiFormat: AiApiFormat;
   model: string;
@@ -211,37 +217,52 @@ function SettingsDialog({
   activeProfileId: string;
   saving: boolean;
 }) {
+  const openAiDefaults = getProviderDefaults("openai");
   const [open, setOpen] = useState(false);
   const [editTarget, setEditTarget] = useState("new");
+  const [provider, setProvider] = useState<AiProvider>("openai");
   const [name, setName] = useState("");
-  const [baseUrl, setBaseUrl] = useState("https://api.openai.com/v1");
-  const [apiFormat, setApiFormat] = useState<AiApiFormat>("responses");
-  const [model, setModel] = useState("gpt-5.1");
+  const [baseUrl, setBaseUrl] = useState(openAiDefaults.baseUrl);
+  const [apiFormat, setApiFormat] = useState<AiApiFormat>(openAiDefaults.apiFormat);
+  const [model, setModel] = useState(openAiDefaults.model);
   const [apiKey, setApiKey] = useState("");
-  const [supportsVision, setSupportsVision] = useState(true);
-  const [maxOutputTokens, setMaxOutputTokens] = useState("1600");
+  const [supportsVision, setSupportsVision] = useState(openAiDefaults.supportsVision);
+  const [maxOutputTokens, setMaxOutputTokens] = useState(String(openAiDefaults.maxOutputTokens));
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort | "auto">("auto");
 
   const editingProfile = useMemo(
     () => profiles.find((profile) => profile.id === editTarget) ?? null,
     [editTarget, profiles],
   );
+  const providerDefaults = getProviderDefaults(provider);
+
+  function applyProviderDefaults(nextProvider: AiProvider, preserveName = true) {
+    const defaults = getProviderDefaults(nextProvider);
+    setProvider(nextProvider);
+    setBaseUrl(defaults.baseUrl);
+    setApiFormat(defaults.apiFormat);
+    setModel(defaults.model);
+    setSupportsVision(defaults.supportsVision);
+    setMaxOutputTokens(String(defaults.maxOutputTokens));
+    setReasoningEffort(defaults.reasoningEffort);
+    if (!preserveName || !name.trim()) {
+      setName(nextProvider === "openai" ? "OpenAI" : "Google AI Studio");
+    }
+  }
 
   function loadProfile(profile: ProfileOption | null) {
     if (!profile) {
       setEditTarget("new");
+      applyProviderDefaults("openai", false);
       setName("");
-      setBaseUrl("https://api.openai.com/v1");
-      setApiFormat("responses");
-      setModel("gpt-5.1");
       setApiKey("");
-      setSupportsVision(true);
-      setMaxOutputTokens("1600");
       setReasoningEffort("auto");
       return;
     }
 
+    const inferredProvider = profile.provider ?? inferProviderFromBaseUrl(profile.baseUrl);
     setEditTarget(profile.id);
+    setProvider(inferredProvider);
     setName(profile.name);
     setBaseUrl(profile.baseUrl);
     setApiFormat(profile.apiFormat);
@@ -272,8 +293,8 @@ function SettingsDialog({
         <DialogHeader>
           <DialogTitle>모델 프로필 설정</DialogTitle>
           <DialogDescription>
-            OpenAI 최신 기본값은 `Responses API`입니다. Base URL에는 `/responses`나
-            `/chat/completions`를 붙이지 마세요.
+            OpenAI와 Google AI Studio를 모두 지원합니다. Base URL에는 엔드포인트 전체가 아니라
+            API root만 넣으세요.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 md:grid-cols-2">
@@ -299,6 +320,21 @@ function SettingsDialog({
             </Select>
           </div>
           <div className="space-y-2">
+            <Label>Provider</Label>
+            <Select
+              value={provider}
+              onValueChange={(value) => applyProviderDefaults(value as AiProvider)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="openai">OpenAI</SelectItem>
+                <SelectItem value="google-ai-studio">Google AI Studio</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
             <Label>프로필 이름</Label>
             <Input value={name} onChange={(event) => setName(event.target.value)} />
           </div>
@@ -309,6 +345,7 @@ function SettingsDialog({
           <div className="space-y-2 md:col-span-2">
             <Label>Base URL</Label>
             <Input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
+            <p className="text-xs text-[var(--muted)]">{providerDefaults.providerDescription}</p>
           </div>
           <div className="space-y-2">
             <Label>API 형식</Label>
@@ -320,7 +357,9 @@ function SettingsDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="responses">Responses API</SelectItem>
+                {provider === "openai" ? (
+                  <SelectItem value="responses">Responses API</SelectItem>
+                ) : null}
                 <SelectItem value="chat-completions">Chat Completions</SelectItem>
               </SelectContent>
             </Select>
@@ -336,7 +375,7 @@ function SettingsDialog({
                   ? editingProfile.hasApiKey
                     ? "변경하지 않으려면 비워두세요"
                     : "기존 프로필에 API 키가 없습니다"
-                  : "sk-..."
+                  : providerDefaults.apiKeyPlaceholder
               }
             />
           </div>
@@ -363,9 +402,11 @@ function SettingsDialog({
               <SelectContent>
                 <SelectItem value="auto">자동</SelectItem>
                 <SelectItem value="none">none</SelectItem>
+                <SelectItem value="minimal">minimal</SelectItem>
                 <SelectItem value="low">low</SelectItem>
                 <SelectItem value="medium">medium</SelectItem>
                 <SelectItem value="high">high</SelectItem>
+                <SelectItem value="xhigh">xhigh</SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -14,7 +14,12 @@ import {
   readingStates,
 } from "@/lib/db/schema";
 import { appPaths } from "@/lib/server/app-paths";
-import { inferApiFormatFromBaseUrl, normalizeAiBaseUrl, normalizeReasoningEffort } from "@/lib/ai/profile-utils";
+import {
+  inferApiFormatFromBaseUrl,
+  inferProviderFromBaseUrl,
+  normalizeAiBaseUrl,
+  normalizeReasoningEffort,
+} from "@/lib/ai/profile-utils";
 import { splitIntoChunks, detectDoi } from "@/lib/papers/chunking";
 import { exportBibtex } from "@/lib/papers/bibtex";
 import { fetchCrossrefMetadata, resolveIdentifier, type ResolvedPaperMetadata } from "@/lib/papers/metadata";
@@ -431,6 +436,7 @@ export async function getWorkspaceSnapshot(selectedPaperId?: string | null): Pro
     profiles: profiles.map((row) => ({
       id: row.id,
       name: row.name,
+      provider: inferProviderFromBaseUrl(row.baseUrl),
       baseUrl: normalizeAiBaseUrl(row.baseUrl),
       apiFormat: (row.apiFormat as AiApiFormat | null) ?? inferApiFormatFromBaseUrl(row.baseUrl),
       model: row.model,

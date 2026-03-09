@@ -47,7 +47,7 @@ export const modelProfileSchema = z.object({
   apiKey: z.string().trim().optional().default(""),
   supportsVision: z.boolean(),
   maxOutputTokens: z.number().int().min(256).max(128_000),
-  reasoningEffort: z.enum(["none", "low", "medium", "high"]).nullable().optional(),
+  reasoningEffort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh"]).nullable().optional(),
 }).superRefine((value, context) => {
   if (!value.id && value.apiKey.length === 0) {
     context.addIssue({

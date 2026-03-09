@@ -18,6 +18,8 @@ import {
 } from "@/lib/ai/prompts";
 import {
   inferApiFormatFromBaseUrl,
+  inferProviderFromBaseUrl,
+  getProviderDefaults,
   normalizeAiBaseUrl,
   normalizeReasoningEffort,
 } from "@/lib/ai/profile-utils";
@@ -41,6 +43,7 @@ function mapProfile(row: typeof aiProfiles.$inferSelect): AiProfileRecord {
   return {
     id: row.id,
     name: row.name,
+    provider: inferProviderFromBaseUrl(row.baseUrl),
     baseUrl: normalizeAiBaseUrl(row.baseUrl),
     apiFormat: (row.apiFormat as AiApiFormat | null) ?? inferApiFormatFromBaseUrl(row.baseUrl),
     model: row.model,
@@ -292,6 +295,7 @@ async function runModelRequest(args: {
     const response = await client.chat.completions.create({
       model: profile.model,
       max_tokens: profile.maxOutputTokens,
+      reasoning_effort: profile.reasoningEffort ?? undefined,
       messages: [
         {
           role: "system",
@@ -390,6 +394,7 @@ export async function saveProfile(input: {
   const now = nowIso();
   const id = input.id ?? crypto.randomUUID();
   const baseUrl = normalizeAiBaseUrl(input.baseUrl);
+  const providerDefaults = getProviderDefaults(inferProviderFromBaseUrl(baseUrl));
   const existing = await db.query.aiProfiles.findFirst({
     where: eq(aiProfiles.id, id),
   });
@@ -400,7 +405,8 @@ export async function saveProfile(input: {
       .set({
         name: input.name,
         baseUrl,
-        apiFormat: input.apiFormat,
+        apiFormat:
+          providerDefaults.provider === "google-ai-studio" ? "chat-completions" : input.apiFormat,
         model: input.model,
         supportsVision: input.supportsVision,
         maxTokens: input.maxOutputTokens,
@@ -413,7 +419,8 @@ export async function saveProfile(input: {
       id,
       name: input.name,
       baseUrl,
-      apiFormat: input.apiFormat,
+      apiFormat:
+        providerDefaults.provider === "google-ai-studio" ? "chat-completions" : input.apiFormat,
       model: input.model,
       supportsVision: input.supportsVision,
       temperature: 0.2,
