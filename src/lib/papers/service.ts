@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import "server-only";
 import { db, nowIso, parseJsonColumn, rawDb, stringifyJsonColumn } from "@/lib/db/client";
 import {
@@ -9,8 +9,10 @@ import {
   aiThreadMessages,
   aiThreads,
   annotations,
+  collections,
   notes,
   paperChunks,
+  paperCollections,
   papers,
   paperSources,
   readingStates,
@@ -33,6 +35,7 @@ import type {
   AnnotationType,
   AskThreadMessageRecord,
   AskThreadRecord,
+  CollectionRecord,
   NoteRecord,
   PaperDetail,
   PaperRecord,
@@ -43,7 +46,18 @@ import type {
   WorkspaceSnapshot,
 } from "@/lib/types";
 
-function mapPaper(row: typeof papers.$inferSelect): PaperRecord {
+function mapCollection(row: typeof collections.$inferSelect): CollectionRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.createdAt,
+  };
+}
+
+function mapPaper(
+  row: typeof papers.$inferSelect,
+  paperCollectionMap: Map<string, CollectionRecord[]> = new Map(),
+): PaperRecord {
   return {
     id: row.id,
     title: row.title,
@@ -60,6 +74,7 @@ function mapPaper(row: typeof papers.$inferSelect): PaperRecord {
     thumbnailPath: row.thumbnailPath,
     fullText: row.fullText,
     pageCount: row.pageCount,
+    collections: paperCollectionMap.get(row.id) ?? [],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -128,6 +143,38 @@ function serializePaperSource(
     sourceType: row.sourceType as PaperSourceType,
     sourceValue: row.sourceValue,
   };
+}
+
+async function listCollectionsForPaperIds(paperIds: string[]) {
+  if (paperIds.length === 0) {
+    return new Map<string, CollectionRecord[]>();
+  }
+
+  const rows = await db
+    .select({
+      paperId: paperCollections.paperId,
+      id: collections.id,
+      name: collections.name,
+      createdAt: collections.createdAt,
+    })
+    .from(paperCollections)
+    .innerJoin(collections, eq(paperCollections.collectionId, collections.id))
+    .where(inArray(paperCollections.paperId, paperIds))
+    .orderBy(asc(collections.name));
+
+  const collectionMap = new Map<string, CollectionRecord[]>();
+
+  for (const row of rows) {
+    const current = collectionMap.get(row.paperId) ?? [];
+    current.push({
+      id: row.id,
+      name: row.name,
+      createdAt: row.createdAt,
+    });
+    collectionMap.set(row.paperId, current);
+  }
+
+  return collectionMap;
 }
 
 async function addPaperSource(paperId: string, sourceType: PaperSourceType, sourceValue: string) {
@@ -376,7 +423,8 @@ export async function listPapers() {
   const rows = await db.query.papers.findMany({
     orderBy: [desc(papers.updatedAt)],
   });
-  return rows.map(mapPaper);
+  const collectionMap = await listCollectionsForPaperIds(rows.map((row) => row.id));
+  return rows.map((row) => mapPaper(row, collectionMap));
 }
 
 export async function getPaperDetail(paperId: string): Promise<PaperDetail | null> {
@@ -397,6 +445,7 @@ export async function getPaperDetail(paperId: string): Promise<PaperDetail | nul
     threadRows,
     readingStateRow,
     markdownFiles,
+    collectionMap,
   ] =
     await Promise.all([
       db.query.paperSources.findMany({
@@ -426,6 +475,7 @@ export async function getPaperDetail(paperId: string): Promise<PaperDetail | nul
         where: eq(readingStates.paperId, paperId),
       }),
       listPaperMarkdownFiles(paperId),
+      listCollectionsForPaperIds([paperId]),
     ]);
 
   const threadIds = new Set(threadRows.map((row) => row.id));
@@ -451,7 +501,7 @@ export async function getPaperDetail(paperId: string): Promise<PaperDetail | nul
     }, {});
 
   return {
-    ...mapPaper(paperRow),
+    ...mapPaper(paperRow, collectionMap),
     sources: sourceRows.map(serializePaperSource),
     annotations: annotationRows.map(mapAnnotation),
     notes: noteRows.map(mapNote),
@@ -496,12 +546,17 @@ export async function getPaperDetail(paperId: string): Promise<PaperDetail | nul
 }
 
 export async function getWorkspaceSnapshot(selectedPaperId?: string | null): Promise<WorkspaceSnapshot> {
-  const paperList = await listPapers();
+  const [paperList, profiles, collectionRows] = await Promise.all([
+    listPapers(),
+    db.query.aiProfiles.findMany({
+      orderBy: (fields, { asc }) => [asc(fields.name)],
+    }),
+    db.query.collections.findMany({
+      orderBy: [asc(collections.name)],
+    }),
+  ]);
   const targetId = selectedPaperId ?? paperList[0]?.id ?? null;
   const selectedPaper = targetId ? await getPaperDetail(targetId) : null;
-  const profiles = await db.query.aiProfiles.findMany({
-    orderBy: (fields, { asc }) => [asc(fields.name)],
-  });
 
   return {
     papers: paperList,
@@ -527,6 +582,90 @@ export async function getWorkspaceSnapshot(selectedPaperId?: string | null): Pro
         updatedAt: row.updatedAt,
       };
     }),
+    collections: collectionRows.map(mapCollection),
+  };
+}
+
+export async function createCollection(name: string) {
+  const normalizedName = name.replace(/\s+/g, " ").trim();
+
+  if (!normalizedName) {
+    throw new Error("폴더 이름을 입력하세요.");
+  }
+
+  const row = {
+    id: crypto.randomUUID(),
+    name: normalizedName,
+    createdAt: nowIso(),
+  };
+
+  try {
+    await db.insert(collections).values(row);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
+      throw new Error("같은 이름의 폴더가 이미 있습니다.");
+    }
+
+    throw error;
+  }
+
+  return mapCollection(row);
+}
+
+export async function deleteCollection(collectionId: string) {
+  const existing = await db.query.collections.findFirst({
+    where: eq(collections.id, collectionId),
+  });
+
+  if (!existing) {
+    throw new Error("삭제할 폴더를 찾지 못했습니다.");
+  }
+
+  await db.delete(collections).where(eq(collections.id, collectionId));
+  return { id: collectionId };
+}
+
+export async function setPaperCollections(paperId: string, collectionIds: string[]) {
+  const paper = await db.query.papers.findFirst({
+    where: eq(papers.id, paperId),
+  });
+
+  if (!paper) {
+    throw new Error("논문을 찾지 못했습니다.");
+  }
+
+  const uniqueIds = [...new Set(collectionIds)];
+
+  if (uniqueIds.length > 0) {
+    const existingCollections = await db.query.collections.findMany({
+      where: inArray(collections.id, uniqueIds),
+    });
+
+    if (existingCollections.length !== uniqueIds.length) {
+      throw new Error("선택한 폴더 중 일부를 찾지 못했습니다.");
+    }
+  }
+
+  const deleteAssignments = rawDb.prepare("DELETE FROM paper_collections WHERE paper_id = ?");
+  const insertAssignment = rawDb.prepare(
+    "INSERT INTO paper_collections (paper_id, collection_id) VALUES (?, ?)",
+  );
+  const touchPaper = rawDb.prepare("UPDATE papers SET updated_at = ? WHERE id = ?");
+  const now = nowIso();
+
+  rawDb.transaction(() => {
+    deleteAssignments.run(paperId);
+
+    for (const collectionId of uniqueIds) {
+      insertAssignment.run(paperId, collectionId);
+    }
+
+    touchPaper.run(now, paperId);
+  })();
+
+  return {
+    paperId,
+    collectionIds: uniqueIds,
   };
 }
 

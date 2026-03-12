@@ -112,6 +112,14 @@ export const threadCreateSchema = z.object({
   title: z.string().min(1).max(120).optional(),
 });
 
+export const collectionCreateSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+});
+
+export const paperCollectionsSchema = z.object({
+  collectionIds: z.array(z.string().uuid()).max(100),
+});
+
 export const urlImportSchema = z.object({
   url: z.string().url(),
 });

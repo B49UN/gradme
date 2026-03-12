@@ -63,6 +63,7 @@ import type {
   AiArtifactRecord,
   AnnotationRecord,
   AskThreadRecord,
+  CollectionRecord,
   FocusKind,
   NoteRecord,
   PaperDetail,
@@ -117,6 +118,7 @@ type AskStreamDraft = {
 };
 
 const EMPTY_PROFILES: ProfileOption[] = [];
+const EMPTY_COLLECTIONS: CollectionRecord[] = [];
 const DESKTOP_HANDLE_WIDTH = 12;
 const DESKTOP_LEFT_MIN = 260;
 const DESKTOP_LEFT_MAX = 520;
@@ -568,14 +570,120 @@ function SettingsDialog({
   );
 }
 
+function CollectionManagerDialog({
+  collections,
+  collectionCounts,
+  creating,
+  deletingCollectionId,
+  onCreate,
+  onDelete,
+}: {
+  collections: CollectionRecord[];
+  collectionCounts: Map<string, number>;
+  creating: boolean;
+  deletingCollectionId: string | null;
+  onCreate: (name: string) => void;
+  onDelete: (collectionId: string) => void;
+}) {
+  const [name, setName] = useState("");
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <FolderOpen className="h-4 w-4" />
+          폴더 관리
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>라이브러리 폴더</DialogTitle>
+          <DialogDescription>
+            폴더를 만들고 삭제해서 논문 분류 체계를 관리합니다.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+
+            const normalizedName = name.replace(/\s+/g, " ").trim();
+            if (!normalizedName) {
+              return;
+            }
+
+            onCreate(normalizedName);
+            setName("");
+          }}
+        >
+          <div className="flex gap-2">
+            <Input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="예: 실험 설계, 읽을 목록, 핵심 참고문헌"
+            />
+            <Button type="submit" disabled={creating || !name.trim()}>
+              {creating ? "생성 중..." : "폴더 추가"}
+            </Button>
+          </div>
+        </form>
+        <div className="space-y-3">
+          {collections.map((collection) => (
+            <div
+              key={collection.id}
+              className="flex items-center justify-between gap-3 rounded-[22px] border border-[var(--line)] bg-white/70 px-4 py-3"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-semibold">{collection.name}</p>
+                <p className="text-xs text-[var(--muted)]">
+                  {collectionCounts.get(collection.id) ?? 0} papers
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 rounded-xl px-2 text-[#a43a2c] hover:bg-[rgba(164,58,44,0.08)]"
+                disabled={deletingCollectionId === collection.id}
+                onClick={() => onDelete(collection.id)}
+                type="button"
+              >
+                <Trash2 className="h-4 w-4" />
+                삭제
+              </Button>
+            </div>
+          ))}
+          {collections.length === 0 ? (
+            <div className="rounded-[22px] border border-dashed border-[var(--line)] bg-white/55 px-4 py-8 text-center text-sm text-[var(--muted)]">
+              아직 만든 폴더가 없습니다.
+            </div>
+          ) : null}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function GradMeApp() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const selectedPaperId = searchParams.get("paper");
   const [libraryQuery, setLibraryQuery] = useState("");
+  const [libraryCollectionFilter, setLibraryCollectionFilter] = useState("all");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<"library" | "reader" | "ai">("reader");
+  const [desktopLayoutMode, setDesktopLayoutMode] = useState<"split" | "tabs">(() =>
+    typeof window !== "undefined"
+      ? (window.localStorage.getItem("gradme.desktopLayoutMode") as "split" | "tabs" | null) ??
+        "split"
+      : "split",
+  );
+  const [desktopTab, setDesktopTab] = useState<"library" | "reader" | "notes" | "ai">("reader");
+  const [isWideViewport, setIsWideViewport] = useState(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia("(min-width: 1280px)").matches
+      : false,
+  );
   const [currentProfileId, setCurrentProfileId] = useState<string>(() =>
     typeof window !== "undefined"
       ? window.localStorage.getItem("gradme.currentProfileId") ?? ""
@@ -626,12 +734,15 @@ export function GradMeApp() {
   const selectedPaper = workspaceQuery.data?.selectedPaper ?? null;
   const effectivePaperId = selectedPaper?.id ?? selectedPaperId ?? "";
   const profiles = profilesQuery.data ?? EMPTY_PROFILES;
+  const collections = workspaceQuery.data?.collections ?? EMPTY_COLLECTIONS;
   const activeProfileId =
     currentProfileId && profiles.some((profile) => profile.id === currentProfileId)
       ? currentProfileId
       : profiles[0]?.id || "";
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null;
   const streamingEnabled = activeProfile?.streamingEnabled ?? true;
+  const showDesktopLayoutToggle = isWideViewport;
+  const useDesktopTabs = showDesktopLayoutToggle && desktopLayoutMode === "tabs";
 
   useEffect(() => {
     if (activeProfileId) {
@@ -641,6 +752,24 @@ export function GradMeApp() {
 
     window.localStorage.removeItem("gradme.currentProfileId");
   }, [activeProfileId]);
+
+  useEffect(() => {
+    window.localStorage.setItem("gradme.desktopLayoutMode", desktopLayoutMode);
+  }, [desktopLayoutMode]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 1280px)");
+    const updateViewportState = () => {
+      setIsWideViewport(mediaQuery.matches);
+    };
+
+    updateViewportState();
+    mediaQuery.addEventListener("change", updateViewportState);
+
+    return () => {
+      mediaQuery.removeEventListener("change", updateViewportState);
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedPaperId && selectedPaper?.id) {
@@ -847,6 +976,44 @@ export function GradMeApp() {
       setStatusMessage(error instanceof Error ? error.message : "프로필 저장에 실패했습니다."),
   });
 
+  const createCollectionMutation = useMutation({
+    mutationFn: (name: string) => postJson<CollectionRecord>("/api/collections", { name }),
+    onSuccess: async (collection) => {
+      setStatusMessage(`폴더를 만들었습니다: ${collection.name}`);
+      setLibraryCollectionFilter(collection.id);
+      await queryClient.invalidateQueries({ queryKey: ["workspace"] });
+    },
+    onError: (error) =>
+      setStatusMessage(error instanceof Error ? error.message : "폴더 생성에 실패했습니다."),
+  });
+
+  const deleteCollectionMutation = useMutation({
+    mutationFn: (collectionId: string) => deleteJson<{ id: string }>(`/api/collections/${collectionId}`),
+    onSuccess: async (result) => {
+      setStatusMessage("폴더를 삭제했습니다.");
+      setLibraryCollectionFilter((current) => (current === result.id ? "all" : current));
+      await queryClient.invalidateQueries({ queryKey: ["workspace"] });
+    },
+    onError: (error) =>
+      setStatusMessage(error instanceof Error ? error.message : "폴더 삭제에 실패했습니다."),
+  });
+
+  const setPaperCollectionsMutation = useMutation({
+    mutationFn: (payload: { paperId: string; collectionIds: string[] }) =>
+      postJson<{ paperId: string; collectionIds: string[] }>(
+        `/api/papers/${payload.paperId}/collections`,
+        {
+          collectionIds: payload.collectionIds,
+        },
+      ),
+    onSuccess: async () => {
+      setStatusMessage("논문 폴더 분류를 저장했습니다.");
+      await queryClient.invalidateQueries({ queryKey: ["workspace"] });
+    },
+    onError: (error) =>
+      setStatusMessage(error instanceof Error ? error.message : "폴더 분류 저장에 실패했습니다."),
+  });
+
   const summaryMutation = useMutation({
     mutationFn: ({ force = false }: { force?: boolean } = {}) =>
       postJson<AiArtifactRecord>(`/api/papers/${effectivePaperId}/ai/summary`, {
@@ -878,6 +1045,9 @@ export function GradMeApp() {
     onSuccess: async (artifact) => {
       setAiTab("translate");
       setActiveTranslationArtifactId(artifact.id);
+      if (useDesktopTabs) {
+        setDesktopTab("ai");
+      }
       await queryClient.invalidateQueries({ queryKey: ["workspace", effectivePaperId] });
     },
     onError: (error) =>
@@ -892,6 +1062,9 @@ export function GradMeApp() {
       setActiveThreadId(thread.id);
       setAskText("");
       setSelectionDraft(null);
+      if (useDesktopTabs) {
+        setDesktopTab("ai");
+      }
       await queryClient.invalidateQueries({ queryKey: ["workspace", effectivePaperId] });
     },
     onError: (error) =>
@@ -923,6 +1096,9 @@ export function GradMeApp() {
       setActiveThreadId(result.thread.id);
       setAskText("");
       setSelectionDraft(null);
+      if (useDesktopTabs) {
+        setDesktopTab("ai");
+      }
       await queryClient.invalidateQueries({ queryKey: ["workspace", effectivePaperId] });
     },
     onError: (error) =>
@@ -1009,6 +1185,10 @@ export function GradMeApp() {
   }
 
   function openSavedMarkdown(file: PaperMarkdownFileRecord) {
+    if (useDesktopTabs) {
+      setDesktopTab("ai");
+    }
+
     if (file.kind === "thread") {
       setAiTab("ask");
       setActiveThreadId(file.targetId);
@@ -1237,23 +1417,58 @@ export function GradMeApp() {
     const papers = workspaceQuery.data?.papers ?? [];
     const query = libraryQuery.trim().toLowerCase();
 
-    if (!query) {
-      return papers;
-    }
-
     return papers.filter((paper) => {
+      const matchesCollection =
+        libraryCollectionFilter === "all"
+          ? true
+          : libraryCollectionFilter === "uncategorized"
+            ? paper.collections.length === 0
+            : paper.collections.some((collection) => collection.id === libraryCollectionFilter);
+
+      if (!matchesCollection) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
       const searchText = [
         paper.title,
         paper.authors.join(" "),
         paper.venue ?? "",
         paper.doi ?? "",
         paper.arxivId ?? "",
+        paper.collections.map((collection) => collection.name).join(" "),
       ]
         .join(" ")
         .toLowerCase();
       return searchText.includes(query);
     });
-  }, [libraryQuery, workspaceQuery.data?.papers]);
+  }, [libraryCollectionFilter, libraryQuery, workspaceQuery.data?.papers]);
+  const collectionCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    let uncategorized = 0;
+
+    for (const collection of collections) {
+      counts.set(collection.id, 0);
+    }
+
+    for (const paper of workspaceQuery.data?.papers ?? []) {
+      if (paper.collections.length === 0) {
+        uncategorized += 1;
+      }
+
+      for (const collection of paper.collections) {
+        counts.set(collection.id, (counts.get(collection.id) ?? 0) + 1);
+      }
+    }
+
+    return {
+      byId: counts,
+      uncategorized,
+    };
+  }, [collections, workspaceQuery.data?.papers]);
 
   const summaryArtifact = selectedPaper
     ? latestArtifact(selectedPaper.artifacts, "summary", activeProfileId, PROMPT_VERSIONS.summary)
@@ -1322,6 +1537,10 @@ export function GradMeApp() {
   );
   const markdownFiles = selectedPaper?.markdownFiles ?? [];
   const selectedPaperReadingPage = selectedPaper?.readingState?.currentPage ?? 1;
+  const selectedPaperCollectionIds = useMemo(
+    () => new Set((selectedPaper?.collections ?? []).map((collection) => collection.id)),
+    [selectedPaper?.collections],
+  );
 
   const annotationById = useMemo(
     () =>
@@ -1387,9 +1606,22 @@ export function GradMeApp() {
     streamingEnabled,
   ]);
 
+  useEffect(() => {
+    if (
+      libraryCollectionFilter !== "all" &&
+      libraryCollectionFilter !== "uncategorized" &&
+      !collections.some((collection) => collection.id === libraryCollectionFilter)
+    ) {
+      setLibraryCollectionFilter("all");
+    }
+  }, [collections, libraryCollectionFilter]);
+
   function openPaper(paperId: string) {
     router.replace(`/?paper=${paperId}`);
     setMobilePane("reader");
+    if (useDesktopTabs) {
+      setDesktopTab("reader");
+    }
   }
 
   function openSelectionNoteDraft(selection: SelectionDraft) {
@@ -1401,6 +1633,9 @@ export function GradMeApp() {
       selection,
     });
     setNoteDialogOpen(true);
+    if (useDesktopTabs) {
+      setDesktopTab("notes");
+    }
   }
 
   function moveReaderToPage(page: number, revealReaderOnMobile = false) {
@@ -1417,6 +1652,8 @@ export function GradMeApp() {
       window.matchMedia("(max-width: 1279px)").matches
     ) {
       setMobilePane("reader");
+    } else if (revealReaderOnMobile && useDesktopTabs) {
+      setDesktopTab("reader");
     }
   }
 
@@ -1425,6 +1662,25 @@ export function GradMeApp() {
     setRequestedReaderPage((current) =>
       current && current.paperId === selectedPaper?.id && current.page === page ? null : current,
     );
+  }
+
+  function toggleSelectedPaperCollection(collectionId: string) {
+    if (!selectedPaper) {
+      return;
+    }
+
+    const nextCollectionIds = new Set(selectedPaperCollectionIds);
+
+    if (nextCollectionIds.has(collectionId)) {
+      nextCollectionIds.delete(collectionId);
+    } else {
+      nextCollectionIds.add(collectionId);
+    }
+
+    setPaperCollectionsMutation.mutate({
+      paperId: selectedPaper.id,
+      collectionIds: [...nextCollectionIds],
+    });
   }
 
   function renderReaderPanel(className?: string) {
@@ -1457,7 +1713,11 @@ export function GradMeApp() {
           onSendSelectionToAi={(selection) => {
             setSelectionDraft(selection);
             setAiTab("ask");
-            setMobilePane("ai");
+            if (useDesktopTabs) {
+              setDesktopTab("ai");
+            } else {
+              setMobilePane("ai");
+            }
           }}
           onCreateSelectionNote={openSelectionNoteDraft}
         />
@@ -1592,17 +1852,35 @@ export function GradMeApp() {
   }
 
   function renderLibraryPanel(className?: string) {
+    const selectedPaperCollectionUpdatePending =
+      setPaperCollectionsMutation.isPending &&
+      setPaperCollectionsMutation.variables?.paperId === selectedPaper?.id;
+
     return (
       <Card className={cn("overflow-hidden xl:flex xl:min-h-0 xl:flex-1 xl:flex-col", className)}>
         <div className="border-b border-[var(--line)] px-5 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="heading-display text-xl font-semibold">Library</p>
               <p className="text-sm text-[var(--muted)]">
                 PDF, DOI, arXiv 기반 논문 수집
               </p>
             </div>
-            <Badge>{workspaceQuery.data?.papers.length ?? 0} papers</Badge>
+            <div className="flex items-center gap-2">
+              <CollectionManagerDialog
+                collections={collections}
+                collectionCounts={collectionCounts.byId}
+                creating={createCollectionMutation.isPending}
+                deletingCollectionId={
+                  deleteCollectionMutation.isPending
+                    ? (deleteCollectionMutation.variables ?? null)
+                    : null
+                }
+                onCreate={(name) => createCollectionMutation.mutate(name)}
+                onDelete={(collectionId) => deleteCollectionMutation.mutate(collectionId)}
+              />
+              <Badge>{workspaceQuery.data?.papers.length ?? 0} papers</Badge>
+            </div>
           </div>
           <div className="relative mt-4">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" />
@@ -1613,6 +1891,81 @@ export function GradMeApp() {
               className="pl-9"
             />
           </div>
+          <div className="mt-4 space-y-3">
+            <div className="paper-scroll overflow-x-auto pb-1">
+              <div className="flex min-w-max gap-2 pr-1">
+                <Button
+                  size="sm"
+                  variant={libraryCollectionFilter === "all" ? "secondary" : "outline"}
+                  onClick={() => setLibraryCollectionFilter("all")}
+                >
+                  전체
+                  <span className="text-xs opacity-75">{workspaceQuery.data?.papers.length ?? 0}</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant={libraryCollectionFilter === "uncategorized" ? "secondary" : "outline"}
+                  onClick={() => setLibraryCollectionFilter("uncategorized")}
+                >
+                  미분류
+                  <span className="text-xs opacity-75">{collectionCounts.uncategorized}</span>
+                </Button>
+                {collections.map((collection) => (
+                  <Button
+                    key={collection.id}
+                    size="sm"
+                    variant={libraryCollectionFilter === collection.id ? "secondary" : "outline"}
+                    onClick={() => setLibraryCollectionFilter(collection.id)}
+                  >
+                    {collection.name}
+                    <span className="text-xs opacity-75">
+                      {collectionCounts.byId.get(collection.id) ?? 0}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+            {selectedPaper ? (
+              <div className="rounded-[22px] border border-[var(--line)] bg-white/65 px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="font-semibold">현재 논문 폴더</p>
+                    <p className="text-sm text-[var(--muted)]">
+                      선택한 논문을 하나 이상의 폴더에 배정할 수 있습니다.
+                    </p>
+                  </div>
+                  <Badge className="bg-transparent">
+                    {selectedPaper.collections.length} assigned
+                  </Badge>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {collections.map((collection) => (
+                    <Button
+                      key={collection.id}
+                      size="sm"
+                      variant={
+                        selectedPaperCollectionIds.has(collection.id) ? "secondary" : "outline"
+                      }
+                      disabled={selectedPaperCollectionUpdatePending}
+                      onClick={() => toggleSelectedPaperCollection(collection.id)}
+                    >
+                      {collection.name}
+                    </Button>
+                  ))}
+                  {collections.length === 0 ? (
+                    <p className="text-sm text-[var(--muted)]">
+                      폴더를 먼저 만들면 여기서 바로 배정할 수 있습니다.
+                    </p>
+                  ) : null}
+                </div>
+                {selectedPaper.collections.length === 0 ? (
+                  <p className="mt-3 text-xs text-[var(--muted)]">
+                    아직 어떤 폴더에도 배정되지 않았습니다.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </div>
         <div className="paper-scroll min-h-0 flex-1 overflow-auto p-4">
           <div className="space-y-3">
@@ -1621,7 +1974,7 @@ export function GradMeApp() {
                 key={paper.id}
                 className={cn(
                   "w-full rounded-[24px] border border-[var(--line)] bg-white/70 p-3 text-left transition hover:-translate-y-0.5 hover:bg-white",
-                  selectedPaperId === paper.id && "border-[var(--accent)] shadow-md",
+                  selectedPaper?.id === paper.id && "border-[var(--accent)] shadow-md",
                 )}
                 onClick={() => openPaper(paper.id)}
               >
@@ -1648,13 +2001,26 @@ export function GradMeApp() {
                       {paper.doi ? <Badge>DOI</Badge> : null}
                       {paper.arxivId ? <Badge>arXiv</Badge> : null}
                     </div>
+                    {paper.collections.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {paper.collections.map((collection) => (
+                          <Badge key={collection.id} className="bg-transparent">
+                            {collection.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-[var(--muted)]">미분류</p>
+                    )}
                   </div>
                 </div>
               </button>
             ))}
             {filteredPapers.length === 0 ? (
               <div className="rounded-[24px] border border-dashed border-[var(--line)] bg-white/50 px-4 py-10 text-center text-sm text-[var(--muted)]">
-                등록된 논문이 없습니다.
+                {workspaceQuery.data?.papers.length
+                  ? "조건에 맞는 논문이 없습니다."
+                  : "등록된 논문이 없습니다."}
               </div>
             ) : null}
           </div>
@@ -2336,6 +2702,24 @@ export function GradMeApp() {
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {showDesktopLayoutToggle ? (
+                <div className="hidden items-center gap-2 xl:flex">
+                  <Button
+                    variant={desktopLayoutMode === "split" ? "secondary" : "outline"}
+                    size="sm"
+                    onClick={() => setDesktopLayoutMode("split")}
+                  >
+                    분할 레이아웃
+                  </Button>
+                  <Button
+                    variant={desktopLayoutMode === "tabs" ? "secondary" : "outline"}
+                    size="sm"
+                    onClick={() => setDesktopLayoutMode("tabs")}
+                  >
+                    탭 레이아웃
+                  </Button>
+                </div>
+              ) : null}
               <ImportDialog
                 onImportFile={(file) => importFileMutation.mutate(file)}
                 onImportUrl={(url) => importUrlMutation.mutate(url)}
@@ -2421,57 +2805,133 @@ export function GradMeApp() {
           {mobilePane === "ai" ? renderAiPanel("min-h-0") : null}
         </div>
 
-        <div
-          ref={desktopLayoutRef}
-          className="relative hidden min-h-0 flex-1 overflow-hidden xl:grid xl:gap-3"
-          style={{
-            gridTemplateColumns: `${desktopColumns.left}px ${DESKTOP_HANDLE_WIDTH}px minmax(0,1fr) ${DESKTOP_HANDLE_WIDTH}px ${desktopColumns.right}px`,
-          }}
-        >
-          <div className="min-h-0 flex flex-col gap-3">
-            {renderLibraryPanel("min-h-0 flex-[1.08]")}
-            {selectedPaper ? (
-              <div className="min-h-0 flex-[0.92]">
-                {renderNotesPanel("h-full")}
+        {useDesktopTabs ? (
+          <Card className="hidden min-h-0 flex-1 overflow-hidden xl:flex">
+            <Tabs
+              value={desktopTab}
+              onValueChange={(value) =>
+                setDesktopTab(value as "library" | "reader" | "notes" | "ai")
+              }
+              className="flex min-h-0 flex-1 flex-col p-5"
+            >
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <TabsList>
+                  <TabsTrigger value="library">Library</TabsTrigger>
+                  <TabsTrigger value="reader">Reader</TabsTrigger>
+                  <TabsTrigger value="notes">Notes</TabsTrigger>
+                  <TabsTrigger value="ai">AI</TabsTrigger>
+                </TabsList>
+                {selectedPaper ? (
+                  <Badge className="bg-transparent">현재 PDF p.{currentReaderPage}</Badge>
+                ) : null}
               </div>
-            ) : null}
-          </div>
 
-          <button
-            type="button"
-            aria-label="왼쪽 패널 너비 조절"
-            className="group flex min-h-0 cursor-col-resize items-stretch"
-            onMouseDown={() => setResizingPane("left")}
+              <TabsContent value="library" className="min-h-0 flex-1">
+                {renderLibraryPanel("h-full")}
+              </TabsContent>
+
+              <TabsContent value="reader" className="min-h-0 flex-1">
+                {selectedPaper ? (
+                  <div className="flex h-full min-h-0 flex-col gap-3">
+                    <Card className="shrink-0 overflow-hidden px-4 py-3">
+                      <div className="space-y-2">
+                        <p className="heading-display text-xl font-semibold leading-tight">
+                          {selectedPaper.title}
+                        </p>
+                        <p className="text-sm text-[var(--muted)]">
+                          {formatAuthors(selectedPaper.authors)}
+                          {selectedPaper.venue ? ` · ${selectedPaper.venue}` : ""}
+                          {selectedPaper.year ? ` · ${selectedPaper.year}` : ""}
+                        </p>
+                      </div>
+                    </Card>
+                    <div className="min-h-0 flex-1">{renderReaderPanel("h-full")}</div>
+                  </div>
+                ) : (
+                  <Card className="flex min-h-[360px] h-full items-center justify-center px-6 py-12 text-center">
+                    <div className="rounded-[22px] border border-dashed border-[var(--line)] bg-white/55 px-6 py-12 text-center">
+                      <p className="heading-display text-2xl font-semibold">논문을 먼저 등록하세요</p>
+                      <p className="mt-2 text-sm text-[var(--muted)]">
+                        등록 후 자동 요약, 주석, 번역, AI 질의를 사용할 수 있습니다.
+                      </p>
+                    </div>
+                  </Card>
+                )}
+              </TabsContent>
+
+              <TabsContent value="notes" className="min-h-0 flex-1">
+                {selectedPaper ? (
+                  renderNotesPanel("h-full")
+                ) : (
+                  <Card className="flex min-h-[360px] h-full items-center justify-center px-6 py-12 text-center">
+                    <div className="rounded-[22px] border border-dashed border-[var(--line)] bg-white/55 px-6 py-12 text-center">
+                      <p className="heading-display text-2xl font-semibold">논문을 먼저 등록하세요</p>
+                      <p className="mt-2 text-sm text-[var(--muted)]">
+                        등록 후 메모와 연결 주석을 사용할 수 있습니다.
+                      </p>
+                    </div>
+                  </Card>
+                )}
+              </TabsContent>
+
+              <TabsContent value="ai" className="min-h-0 flex-1">
+                {renderAiPanel("h-full")}
+              </TabsContent>
+            </Tabs>
+          </Card>
+        ) : (
+          <div
+            ref={desktopLayoutRef}
+            className="relative hidden min-h-0 flex-1 overflow-hidden xl:grid xl:gap-3"
+            style={{
+              gridTemplateColumns: `${desktopColumns.left}px ${DESKTOP_HANDLE_WIDTH}px minmax(0,1fr) ${DESKTOP_HANDLE_WIDTH}px ${desktopColumns.right}px`,
+            }}
           >
-            <span className="mx-auto my-2 w-1.5 rounded-full bg-[rgba(23,34,47,0.14)] transition group-hover:bg-[rgba(194,100,45,0.45)] group-active:bg-[rgba(194,100,45,0.7)]" />
-          </button>
-
-          <div className="min-h-0 flex flex-col">
-            {selectedPaper ? (
-              <div className="min-h-0 flex-1">{renderReaderPanel("h-full")}</div>
-            ) : (
-              <Card className="flex min-h-[360px] flex-1 items-center justify-center px-6 py-12 text-center">
-                <div className="rounded-[22px] border border-dashed border-[var(--line)] bg-white/55 px-6 py-12 text-center">
-                  <p className="heading-display text-2xl font-semibold">논문을 먼저 등록하세요</p>
-                  <p className="mt-2 text-sm text-[var(--muted)]">
-                    등록 후 자동 요약, 주석, 번역, AI 질의를 사용할 수 있습니다.
-                  </p>
+            <div className="min-h-0 flex flex-col gap-3">
+              {renderLibraryPanel("min-h-0 flex-[1.08]")}
+              {selectedPaper ? (
+                <div className="min-h-0 flex-[0.92]">
+                  {renderNotesPanel("h-full")}
                 </div>
-              </Card>
-            )}
+              ) : null}
+            </div>
+
+            <button
+              type="button"
+              aria-label="왼쪽 패널 너비 조절"
+              className="group flex min-h-0 cursor-col-resize items-stretch"
+              onMouseDown={() => setResizingPane("left")}
+            >
+              <span className="mx-auto my-2 w-1.5 rounded-full bg-[rgba(23,34,47,0.14)] transition group-hover:bg-[rgba(194,100,45,0.45)] group-active:bg-[rgba(194,100,45,0.7)]" />
+            </button>
+
+            <div className="min-h-0 flex flex-col">
+              {selectedPaper ? (
+                <div className="min-h-0 flex-1">{renderReaderPanel("h-full")}</div>
+              ) : (
+                <Card className="flex min-h-[360px] flex-1 items-center justify-center px-6 py-12 text-center">
+                  <div className="rounded-[22px] border border-dashed border-[var(--line)] bg-white/55 px-6 py-12 text-center">
+                    <p className="heading-display text-2xl font-semibold">논문을 먼저 등록하세요</p>
+                    <p className="mt-2 text-sm text-[var(--muted)]">
+                      등록 후 자동 요약, 주석, 번역, AI 질의를 사용할 수 있습니다.
+                    </p>
+                  </div>
+                </Card>
+              )}
+            </div>
+
+            <button
+              type="button"
+              aria-label="오른쪽 패널 너비 조절"
+              className="group flex min-h-0 cursor-col-resize items-stretch"
+              onMouseDown={() => setResizingPane("right")}
+            >
+              <span className="mx-auto my-2 w-1.5 rounded-full bg-[rgba(23,34,47,0.14)] transition group-hover:bg-[rgba(194,100,45,0.45)] group-active:bg-[rgba(194,100,45,0.7)]" />
+            </button>
+
+            {renderAiPanel("min-h-0")}
           </div>
-
-          <button
-            type="button"
-            aria-label="오른쪽 패널 너비 조절"
-            className="group flex min-h-0 cursor-col-resize items-stretch"
-            onMouseDown={() => setResizingPane("right")}
-          >
-            <span className="mx-auto my-2 w-1.5 rounded-full bg-[rgba(23,34,47,0.14)] transition group-hover:bg-[rgba(194,100,45,0.45)] group-active:bg-[rgba(194,100,45,0.7)]" />
-          </button>
-
-          {renderAiPanel("min-h-0")}
-        </div>
+        )}
       </div>
     </div>
   );

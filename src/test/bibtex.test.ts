@@ -18,6 +18,7 @@ const basePaper: PaperRecord = {
   thumbnailPath: null,
   fullText: "",
   pageCount: 12,
+  collections: [],
   createdAt: "2026-03-08T00:00:00.000Z",
   updatedAt: "2026-03-08T00:00:00.000Z",
 };

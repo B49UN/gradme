@@ -46,6 +46,12 @@ export type AreaSelectionRef = {
 
 export type PaperSelectionRef = TextSelectionRef | AreaSelectionRef;
 
+export type CollectionRecord = {
+  id: string;
+  name: string;
+  createdAt: string;
+};
+
 export type PaperRecord = {
   id: string;
   title: string;
@@ -62,6 +68,7 @@ export type PaperRecord = {
   thumbnailPath: string | null;
   fullText: string;
   pageCount: number;
+  collections: CollectionRecord[];
   createdAt: string;
   updatedAt: string;
 };
@@ -184,4 +191,5 @@ export type WorkspaceSnapshot = {
   papers: PaperRecord[];
   selectedPaper: PaperDetail | null;
   profiles: AiProfileRecord[];
+  collections: CollectionRecord[];
 };
